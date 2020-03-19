@@ -13,17 +13,16 @@ let ``Cannot create invalid fields`` (field : StrictField) =
         let apiKey = "PASTE YOUR API-KEY HERE" // DO NOT COMMIT THIS
         use client = new SearchServiceClient(searchServiceName, SearchCredentials apiKey)
 
-        let fields =
-            let extraField =
-                let basicInfo =
-                    let makeInfo name = { Name = name; IsFilterable = false; IsSortable = false; IsFacetable = false }
-                    match field with
-                    | KeyField -> NonKeyField { Common = makeInfo "somethingElse"; Type = Primitive String; IsHidden = false }
-                    | _ -> makeInfo "id" |> KeyField
+        let extraField =
+            let commonInfo =
+                let makeInfo name = { Name = name; IsFilterable = false; IsSortable = false; IsFacetable = false }
+                match field with
+                | KeyField -> NonKeyField (makeInfo "somethingElse", { Type = Primitive String; IsHidden = false })
+                | _ -> makeInfo "id" |> KeyField
 
-                NonSearchableField basicInfo |> Simple
+            NonSearchableField commonInfo |> Simple
 
-            [field; extraField] |> List.map (fun f -> f.Definition) |> ResizeArray<Field>
+        let fields = [field; extraField] |> List.map (fun f -> f.Definition) |> ResizeArray<Field>
 
         let index = Index("myindex", fields)
 

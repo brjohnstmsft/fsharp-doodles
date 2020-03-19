@@ -97,14 +97,13 @@ type CommonFieldInfo = {
 }
 
 type NonKeyFieldInfo = {
-    Common : CommonFieldInfo
     // Searchability shouldn't depend on data type at compile time in case
     // we support it for new types in the future.
     Type : SimpleDataType 
     IsHidden : bool
 }
 
-type BasicFieldInfo =
+type SimpleFieldInfo =
     // This model makes it impossible to create a key that isn't a string or a hidden key.
     // This seems fine to enforce statically since we're unlikely to support compound keys or keys of other data types,
     // and the key field can't be hidden for obvious reasons.
@@ -112,20 +111,19 @@ type BasicFieldInfo =
     // - Sub-fields of complex fields cannot be key fields.
     // - There must be exactly one key field per index.
     | KeyField of CommonFieldInfo
-    | NonKeyField of NonKeyFieldInfo
+    | NonKeyField of CommonFieldInfo * NonKeyFieldInfo
 with
     member this.Common =
         match this with
         | KeyField kf -> kf
-        | NonKeyField nkf -> nkf.Common
+        | NonKeyField (info, nkf) -> info
 
     member this.DataType =
         match this with
-        | KeyField kf -> (Primitive String)
-        | NonKeyField nkf -> nkf.Type
+        | KeyField _ -> (Primitive String)
+        | NonKeyField (info, nkf) -> nkf.Type
 
 type SearchableFieldInfo = {
-    BasicInfo : BasicFieldInfo
     Analyzer : AnalyzerInfo option
     
     // Even though this is an array in the REST API, currently only one is allowed per field,
@@ -135,13 +133,13 @@ type SearchableFieldInfo = {
 }
 
 type SimpleField =
-    | NonSearchableField of BasicFieldInfo      // Implies searchable: false
-    | SearchableField of SearchableFieldInfo    // Implies searchable: true
+    | NonSearchableField of SimpleFieldInfo      // Implies searchable: false
+    | SearchableField of SimpleFieldInfo * SearchableFieldInfo    // Implies searchable: true
 with
     member this.BasicInfo =
         match this with
         | NonSearchableField nsf -> nsf
-        | SearchableField sf -> sf.BasicInfo
+        | SearchableField (info, _) -> info
 
     member this.Definition =
         let makeField info isSearchable analyzerNameOpt searchAnalyzerNameOpt indexAnalyzerNameOpt =
@@ -169,17 +167,17 @@ with
 
             match info with
             | KeyField kf -> makeField' kf (Primitive String) true false
-            | NonKeyField nkf -> makeField' nkf.Common nkf.Type false nkf.IsHidden
+            | NonKeyField (info, nkf) -> makeField' info nkf.Type false nkf.IsHidden
 
         match this with
         | NonSearchableField nsf -> makeField nsf false None None None
-        | SearchableField sf -> 
+        | SearchableField (info, sf) -> 
             match sf.Analyzer with
-            | None -> makeField sf.BasicInfo true None None None
+            | None -> makeField info true None None None
             | Some (Analyzer analyzerName) ->
-                makeField sf.BasicInfo true (Some analyzerName) None None
+                makeField info true (Some analyzerName) None None
             | Some (DualAnalyzers { IndexAnalyzer = indexAnalyzer; SearchAnalyzer = searchAnalyzer }) ->
-                makeField sf.BasicInfo true None (Some searchAnalyzer) (Some indexAnalyzer)
+                makeField info true None (Some searchAnalyzer) (Some indexAnalyzer)
 
 type NonEmptyList<'a> = {
     Head : 'a
@@ -210,7 +208,7 @@ with
     member this.Name =
         match this with
         | Simple (NonSearchableField nsf) -> nsf.Common.Name
-        | Simple (SearchableField sf) -> sf.BasicInfo.Common.Name
+        | Simple (SearchableField (info, _)) -> info.Common.Name
         | Complex cf -> cf.Name
 
     member this.IsValid =
@@ -256,6 +254,6 @@ and ComplexField = {
 
 let (|KeyField|_|) f =
     match f with
-    | Simple (SearchableField { BasicInfo = (KeyField _); Analyzer = _; SynonymMap = _ }) -> Some ()
+    | Simple (SearchableField (KeyField _, { Analyzer = _; SynonymMap = _ })) -> Some ()
     | Simple (NonSearchableField (KeyField _)) -> Some ()
     | _ -> None
