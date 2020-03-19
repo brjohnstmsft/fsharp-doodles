@@ -1,6 +1,7 @@
 ﻿module FieldPrototype
 
 open System
+open System.Text.RegularExpressions
 open Microsoft.Azure.Search.Models
 
 type PrimitiveType = String | Int32 | Int64 | Double | DateTimeOffset | Boolean | GeographyPoint
@@ -24,6 +25,16 @@ with
         | Primitive t -> t.Definition
         | Collection t -> DataType.Collection(t.Definition)
 
+let (|StringType|_|) t =
+    match t with
+    | Primitive String | Collection String -> Some ()
+    | _ -> None
+
+let (|GeoPointType|_|) t =
+    match t with
+    | Primitive GeographyPoint | Collection GeographyPoint -> Some ()
+    | _ -> None
+
 type ComplexDataType =
     | ComplexType
     | ComplexCollection
@@ -33,38 +44,47 @@ with
         | ComplexType -> DataType.Complex
         | ComplexCollection -> DataType.Collection(DataType.Complex)
 
-// Use a subset of analyzer names for test purposes
-type StrictAnalyzerName =
+// Use a subset of analyzer names for test purposes. Note the distinction between language and non-language analyzers.
+type LanguageAnalyzerName =
     | EnLucene
     | EnMicrosoft
     | FrLucene
     | FrMicrosoft
     | Standard
+
+type NonLanguageAnalyzerName =
+    | Keyword
+    | Simple
+    | Stop
+    | Whitespace
+
+type StrictAnalyzerName =
+    | Language of LanguageAnalyzerName
+    | NonLanguage of NonLanguageAnalyzerName
 with
     member this.Definition =
         match this with
-        | EnLucene -> AnalyzerName.EnLucene
-        | EnMicrosoft -> AnalyzerName.EnMicrosoft
-        | FrLucene -> AnalyzerName.FrLucene
-        | FrMicrosoft -> AnalyzerName.FrMicrosoft
-        | Standard -> AnalyzerName.StandardLucene
+        | Language EnLucene -> AnalyzerName.EnLucene
+        | Language EnMicrosoft -> AnalyzerName.EnMicrosoft
+        | Language FrLucene -> AnalyzerName.FrLucene
+        | Language FrMicrosoft -> AnalyzerName.FrMicrosoft
+        | Language Standard -> AnalyzerName.StandardLucene
+        | NonLanguage Keyword -> AnalyzerName.Keyword
+        | NonLanguage Simple -> AnalyzerName.Simple
+        | NonLanguage Stop -> AnalyzerName.Stop
+        | NonLanguage Whitespace -> AnalyzerName.Whitespace
 
 type DualAnalyzerInfo = {
-    IndexAnalyzer : StrictAnalyzerName
-    SearchAnalyzer : StrictAnalyzerName
+    IndexAnalyzer : NonLanguageAnalyzerName
+    SearchAnalyzer : NonLanguageAnalyzerName
 }
 
 type AnalyzerInfo =
     | Analyzer of StrictAnalyzerName
     | DualAnalyzers of DualAnalyzerInfo
 
-type BasicFieldInfo = {
+type CommonFieldInfo = {
     Name : string
-    // Searchability shouldn't depend on data type at compile time in case
-    // we support it for new types in the future.
-    Type : SimpleDataType 
-    IsKey : bool
-    IsHidden : bool
     IsFilterable : bool
     // Sortability depends on *where* the field is defined, not just how. For example,
     // scalar sub-fields held directly or indirectly by a complex collection have multiple
@@ -76,79 +96,97 @@ type BasicFieldInfo = {
     IsFacetable : bool
 }
 
+type NonKeyFieldInfo = {
+    Common : CommonFieldInfo
+    // Searchability shouldn't depend on data type at compile time in case
+    // we support it for new types in the future.
+    Type : SimpleDataType 
+    IsHidden : bool
+}
+
+type BasicFieldInfo =
+    // This model makes it impossible to create a key that isn't a string or a hidden key.
+    // This seems fine to enforce statically since we're unlikely to support compound keys or keys of other data types,
+    // and the key field can't be hidden for obvious reasons.
+    // However, some validation rules this doesn't enforce statically:
+    // - Sub-fields of complex fields cannot be key fields.
+    // - There must be exactly one key field per index.
+    | KeyField of CommonFieldInfo
+    | NonKeyField of NonKeyFieldInfo
+with
+    member this.Common =
+        match this with
+        | KeyField kf -> kf
+        | NonKeyField nkf -> nkf.Common
+
+    member this.DataType =
+        match this with
+        | KeyField kf -> (Primitive String)
+        | NonKeyField nkf -> nkf.Type
+
 type SearchableFieldInfo = {
     BasicInfo : BasicFieldInfo
     Analyzer : AnalyzerInfo option
-    SynonymMaps : string list
+    
+    // Even though this is an array in the REST API, currently only one is allowed per field,
+    // and must already exist in the service.  
+    // Modeling this as just a string also prevents FsCheck from running too long. :P
+    SynonymMap : string
 }
 
 type SimpleField =
     | NonSearchableField of BasicFieldInfo      // Implies searchable: false
     | SearchableField of SearchableFieldInfo    // Implies searchable: true
 with
-    member this.Definition =
+    member this.BasicInfo =
         match this with
-        | NonSearchableField nsf ->
-            Field.New(
-                nsf.Name, 
-                nsf.Type.Definition, 
-                nsf.IsKey, 
-                not nsf.IsHidden, 
-                false, // isSearchable
-                nsf.IsFilterable, 
-                nsf.IsSortable, 
-                nsf.IsFacetable)
-        | SearchableField sf ->
+        | NonSearchableField nsf -> nsf
+        | SearchableField sf -> sf.BasicInfo
+
+    member this.Definition =
+        let makeField info isSearchable analyzerNameOpt searchAnalyzerNameOpt indexAnalyzerNameOpt =
+            let convertAnalyzer (aOpt : StrictAnalyzerName option) =
+                aOpt
+                |> Option.map (fun a -> a.Definition |> Nullable<AnalyzerName>)
+                |> (fun a -> defaultArg a (Nullable<AnalyzerName> ()))
+
+            let convertNonLanguageAnalyzer = Option.map NonLanguage >> convertAnalyzer
+
+            let makeField' common (dataType : SimpleDataType) isKey isHidden =
+                Field.New(
+                    common.Name,
+                    dataType.Definition,
+                    isKey,
+                    not isHidden,
+                    isSearchable,
+                    common.IsFilterable, 
+                    common.IsSortable, 
+                    common.IsFacetable,
+                    convertAnalyzer analyzerNameOpt,
+                    convertNonLanguageAnalyzer searchAnalyzerNameOpt,
+                    convertNonLanguageAnalyzer indexAnalyzerNameOpt,
+                    ResizeArray<string> ()) // Ignore synonym maps. They're non-trivial to validate with FsCheck.
+
+            match info with
+            | KeyField kf -> makeField' kf (Primitive String) true false
+            | NonKeyField nkf -> makeField' nkf.Common nkf.Type false nkf.IsHidden
+
+        match this with
+        | NonSearchableField nsf -> makeField nsf false None None None
+        | SearchableField sf -> 
             match sf.Analyzer with
-            | None ->
-                Field.New(
-                    sf.BasicInfo.Name,
-                    sf.BasicInfo.Type.Definition,
-                    sf.BasicInfo.IsKey,
-                    not sf.BasicInfo.IsHidden,
-                    true, // isSearchable
-                    sf.BasicInfo.IsFilterable,
-                    sf.BasicInfo.IsSortable,
-                    sf.BasicInfo.IsFacetable,
-                    Nullable<AnalyzerName> (), // analyzerName
-                    Nullable<AnalyzerName> (), // searchAnalyzerName
-                    Nullable<AnalyzerName> (), // indexAnalyzerName
-                    sf.SynonymMaps |> ResizeArray<string>)
+            | None -> makeField sf.BasicInfo true None None None
             | Some (Analyzer analyzerName) ->
-                Field.New(
-                    sf.BasicInfo.Name,
-                    sf.BasicInfo.Type.Definition,
-                    sf.BasicInfo.IsKey,
-                    not sf.BasicInfo.IsHidden,
-                    true, // isSearchable
-                    sf.BasicInfo.IsFilterable,
-                    sf.BasicInfo.IsSortable,
-                    sf.BasicInfo.IsFacetable,
-                    analyzerName.Definition |> Nullable<AnalyzerName>,
-                    Nullable<AnalyzerName> (), // searchAnalyzerName
-                    Nullable<AnalyzerName> (), // indexAnalyzerName
-                    sf.SynonymMaps |> ResizeArray<string>)
+                makeField sf.BasicInfo true (Some analyzerName) None None
             | Some (DualAnalyzers { IndexAnalyzer = indexAnalyzer; SearchAnalyzer = searchAnalyzer }) ->
-                Field.New(
-                    sf.BasicInfo.Name,
-                    sf.BasicInfo.Type.Definition,
-                    sf.BasicInfo.IsKey,
-                    not sf.BasicInfo.IsHidden,
-                    true, // isSearchable
-                    sf.BasicInfo.IsFilterable,
-                    sf.BasicInfo.IsSortable,
-                    sf.BasicInfo.IsFacetable,
-                    Nullable<AnalyzerName> (), // analyzerName
-                    searchAnalyzer.Definition |> Nullable<AnalyzerName>,
-                    indexAnalyzer.Definition |> Nullable<AnalyzerName>,
-                    sf.SynonymMaps |> ResizeArray<string>)
+                makeField sf.BasicInfo true None (Some searchAnalyzer) (Some indexAnalyzer)
 
 type NonEmptyList<'a> = {
     Head : 'a
     Tail : 'a list
 }
 with
-    member this.AsList = [this.Head] @ this.Tail
+    member this.AsList = this.Head::this.Tail
 
 type StrictField =
     | Simple of SimpleField
@@ -169,29 +207,55 @@ with
                     cf.Fields.AsList |> List.map makeField |> ResizeArray<Field>)
         makeField this
 
-    member this.IsKey =
-        match this with
-        | Simple (NonSearchableField nsf) -> nsf.IsKey
-        | Simple (SearchableField sf) -> sf.BasicInfo.IsKey
-        | _ -> false
-
     member this.Name =
         match this with
-        | Simple (NonSearchableField nsf) -> nsf.Name
-        | Simple (SearchableField sf) -> sf.BasicInfo.Name
+        | Simple (NonSearchableField nsf) -> nsf.Common.Name
+        | Simple (SearchableField sf) -> sf.BasicInfo.Common.Name
         | Complex cf -> cf.Name
 
-    (*member this.IsValid =
-        let rec isValid f =
-            match f with
-            | Simple (NonSearchableField nsf) -> nsf.Name
-            | Simple (SearchableField sf) -> sf.BasicInfo.Name
-            | Complex cf -> cf.Name
+    member this.IsValid =
+        let isNameValid name =
+            if String.IsNullOrEmpty name then false
+            else Regex.IsMatch (name, "^[a-zA-Z][a-zA-Z0-9_]*$")
+ 
+        let rec isValid (f : StrictField) =
+            if isNameValid f.Name then
+                match f with
+                | Simple sf ->
+                    let info = sf.BasicInfo.Common
+                    let dataType = sf.BasicInfo.DataType
 
-        not (String.IsNullOrEmpty this.Name) && (isValid this)*)
+                    let isFacetableValid =
+                        match dataType with
+                        | GeoPointType -> not info.IsFacetable
+                        | _ -> true
+
+                    let isSearchableValid =
+                        match dataType, sf with
+                        | _, NonSearchableField _ -> true
+                        | StringType, SearchableField _ -> true
+                        | _ -> false
+
+                    let isSortableValid =
+                        match dataType with
+                        | Collection _ -> not info.IsSortable
+                        | _ -> true
+
+                    isFacetableValid && isSearchableValid && isSortableValid
+
+                | Complex cf -> cf.Fields.AsList |> List.forall isValid
+            else false
+
+        isValid this
 
 and ComplexField = {
     Name : string
     Type : ComplexDataType
     Fields : NonEmptyList<StrictField>
 }
+
+let (|KeyField|_|) f =
+    match f with
+    | Simple (SearchableField { BasicInfo = (KeyField _); Analyzer = _; SynonymMap = _ }) -> Some ()
+    | Simple (NonSearchableField (KeyField _)) -> Some ()
+    | _ -> None
