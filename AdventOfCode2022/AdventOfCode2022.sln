@@ -15,7 +15,9 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "ElfSupplyStacks", "ElfSuppl
 EndProject
 Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "ElfTuningTrouble", "ElfTuningTrouble\ElfTuningTrouble.fsproj", "{5B4BA610-7E5E-4F9C-AED3-F985AD9B75DD}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "ElfNoSpace", "ElfNoSpace\ElfNoSpace.fsproj", "{466819B4-C495-4D1E-B3CB-FA2A70EC6340}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "ElfNoSpace", "ElfNoSpace\ElfNoSpace.fsproj", "{466819B4-C495-4D1E-B3CB-FA2A70EC6340}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "ElfTreeHouse", "ElfTreeHouse\ElfTreeHouse.fsproj", "{8909388B-2193-4A85-A7C8-AAE99FDC0837}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -51,6 +53,10 @@ Global
 		{466819B4-C495-4D1E-B3CB-FA2A70EC6340}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{466819B4-C495-4D1E-B3CB-FA2A70EC6340}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{466819B4-C495-4D1E-B3CB-FA2A70EC6340}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8909388B-2193-4A85-A7C8-AAE99FDC0837}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8909388B-2193-4A85-A7C8-AAE99FDC0837}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8909388B-2193-4A85-A7C8-AAE99FDC0837}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8909388B-2193-4A85-A7C8-AAE99FDC0837}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
