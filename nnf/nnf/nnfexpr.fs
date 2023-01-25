@@ -43,24 +43,9 @@ let LessOrEqualTo s i = Comparison (s, LessOrEqual, i)
 let GreaterThan s i = Comparison (s, Greater, i)
 let GreaterOrEqualTo s i = Comparison (s, GreaterOrEqual, i)
 
-let private copy matchExpr makeExpr args expr =
-    match matchExpr expr with
-    | Some args' -> if args = args' then expr else makeExpr args
-    | None -> failwith "Invalid expression type."
-
-let XAnd t expr = copy (fun e -> match e with And t -> Some t | _ -> None) And t expr
-
-let XOr t expr = copy (fun e -> match e with Or t -> Some t | _ -> None) Or t expr
-
-let XNot x expr = copy (fun e -> match e with Not x -> Some x | _ -> None) Not x expr
-
-let XAny x expr = copy (fun e -> match e with Any x -> Some x | _ -> None) Any x expr
-
-let XAll x expr = copy (fun e -> match e with All x -> Some x | _ -> None) All x expr
-
-let XComparison t expr = copy (fun e -> match e with Comparison t -> Some t | _ -> None) Comparison t expr
-
-let rec xfoldAcc andf orf notf anyf allf compf updateAcc acc expr : 'r =
+// Recursively navigate the AST in depth-first preorder, flowing and updating a given accumulator value to pass to each step,
+// and accumulating a final result as the traversal winds back up the three.
+let rec private xfoldAcc andf orf notf anyf allf compf updateAcc acc expr : 'r =
     let newAcc = updateAcc expr acc
     let recurse = xfoldAcc andf orf notf anyf allf compf updateAcc newAcc
     match expr with
@@ -71,6 +56,7 @@ let rec xfoldAcc andf orf notf anyf allf compf updateAcc acc expr : 'r =
     | All x -> allf (recurse x) expr acc
     | Comparison t -> compf t expr acc
 
+// Recursively navigate the AST in depth-first preorder, accumulating a final result as the traversal winds back up the three.
 let xfold andf orf notf anyf allf compf expr : 'r =
     let ignoreAcc f t e _ = f t e
     let update _ acc = acc
@@ -78,7 +64,23 @@ let xfold andf orf notf anyf allf compf expr : 'r =
     xfoldAcc (ignoreAcc andf) (ignoreAcc orf) (ignoreAcc notf) (ignoreAcc anyf) (ignoreAcc allf)
         (ignoreAcc compf) update 0 expr
 
+// Recursively navigate the AST in depth-first preorder, flowing and updating a given accumulator value to pass to each step,
+// and rewriting AST nodes as the traversal winds back up the three.
 let replaceAcc rewrite updateAcc acc expr =
+    let copy matchExpr makeExpr args expr =
+        match matchExpr expr with
+        | Some args' -> if args = args' then expr else makeExpr args
+        | None -> failwith "Invalid expression type."
+
+    // These basically assert that the node is of the expected type and return it, or construct a new one if the node's
+    // children changed.
+    let XAnd = copy (function And t -> Some t | _ -> None) And
+    let XOr = copy (function Or t -> Some t | _ -> None) Or
+    let XNot = copy (function Not x -> Some x | _ -> None) Not
+    let XAny = copy (function Any x -> Some x | _ -> None) Any
+    let XAll = copy (function All x -> Some x | _ -> None) All
+    let XComparison = copy (function Comparison t -> Some t | _ -> None) Comparison
+
     let andf t e acc = XAnd t e |> rewrite acc
     let orf t e acc = XOr t e |> rewrite acc
     let notf x e acc = XNot x e |> rewrite acc
@@ -88,11 +90,13 @@ let replaceAcc rewrite updateAcc acc expr =
 
     xfoldAcc andf orf notf anyf allf compf updateAcc acc expr
 
+// Recursively navigate the AST in depth-first preorder, rewriting AST nodes as the traversal winds back up the three.
 let replace rewrite expr =
     let ignoreAcc _ e = rewrite e
     let update _ acc = acc
     replaceAcc ignoreAcc update 0 expr
 
+// Put the given expression in a normal form guaranteed to have no NotEquals and no All operators.
 let canonicalize expr =
     let rewrite expr =
         match expr with
@@ -100,7 +104,7 @@ let canonicalize expr =
         | All x -> Not (Any (Not x))
         | _ -> expr
 
-    replace rewrite expr    
+    replace rewrite expr
 
 type ExprType =
     | Literal

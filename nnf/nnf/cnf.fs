@@ -2,6 +2,7 @@
 
 open NNF.NNFExpr
 
+// CNF classification implemented directly with recursion.
 let classifyCnfRecursive =
     let rec (|Literal|_|) =
         function
@@ -27,6 +28,8 @@ let classifyCnfRecursive =
     | Conjunction -> Conjunction
     | _ -> Unknown
 
+// CNF classification implemented in terms of xfold.
+// NOTE: This is not strictly iterative, but in principle it could be if xfold were internally implemented iteratively.
 let classifyCnfIterative expr =
     let orf (lhs, rhs) =
         match lhs with

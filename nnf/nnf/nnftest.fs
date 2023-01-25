@@ -93,7 +93,7 @@ let ``Iterative CNF algorithm gives same result as classical CNF algorithm`` ast
 let ``DNF is CNF negated and put in NNF`` ast =
     let normalizedAst = ast |> canonicalize
     let cnfResult = Not normalizedAst |> nnf |> classifyCnfRecursive
-    let dnfResult = nnf normalizedAst |> classifyDnfRecursive
+    let dnfResult = normalizedAst |> nnf |> classifyDnfRecursive
     let expected = cnfResult <> Unknown
     let actual = dnfResult <> Unknown
     expected =! actual

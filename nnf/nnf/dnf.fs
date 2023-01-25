@@ -2,6 +2,7 @@
 
 open NNF.NNFExpr
 
+// DNF classification implemented directly with recursion.
 let classifyDnfRecursive =
     let rec (|Literal|_|) =
         function
@@ -27,6 +28,8 @@ let classifyDnfRecursive =
     | Disjunction -> Disjunction
     | _ -> Unknown
 
+// DNF classification implemented in terms of xfold.
+// NOTE: This is not strictly iterative, but in principle it could be if xfold were internally implemented iteratively.
 let classifyDnfIterative expr =
     let andf (lhs, rhs) =
         match lhs with
