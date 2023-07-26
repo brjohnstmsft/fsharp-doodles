@@ -90,10 +90,10 @@ let ``Iterative CNF algorithm gives same result as classical CNF algorithm`` ast
     expected =! actual
 
 [<Property(Arbitrary = [|typeof<MyGenerators>|])>]
-let ``DNF is CNF negated and put in NNF`` ast =
-    let normalizedAst = ast |> canonicalize
+let ``If X is DNF then NNF of Not X is CNF`` ast =
+    let normalizedAst = ast |> nnf |> canonicalize
     let cnfResult = Not normalizedAst |> nnf |> classifyCnfRecursive
-    let dnfResult = normalizedAst |> nnf |> classifyDnfRecursive
+    let dnfResult = normalizedAst |> classifyDnfRecursive
     let expected = cnfResult <> Unknown
     let actual = dnfResult <> Unknown
     expected =! actual
