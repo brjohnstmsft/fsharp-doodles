@@ -3,6 +3,7 @@
 open NNF.NNFExpr
 
 // DNF classification implemented directly with recursion.
+// Reference: https://en.wikipedia.org/wiki/Disjunctive_normal_form
 let classifyDnfRecursive =
     let rec (|Literal|_|) =
         function
@@ -31,23 +32,20 @@ let classifyDnfRecursive =
 // DNF classification implemented in terms of xfold.
 // NOTE: This is not strictly iterative, but in principle it could be if xfold were internally implemented iteratively.
 let classifyDnfIterative expr =
-    let andf (lhs, rhs) =
-        match lhs with
-        | Literal | Conjunction ->
-            match rhs with
-            | Literal | Conjunction -> Conjunction
-            | _ -> Unknown
+    let andf =
+        function
+        | (Literal | Conjunction), (Literal | Conjunction) -> Conjunction
         | _ -> Unknown
         
-    let orf (lhs, rhs) =
-        match lhs with
-        | Literal | Conjunction | Disjunction ->
-            match rhs with
-            | Literal | Conjunction | Disjunction -> Disjunction
-            | _ -> Unknown
+    let orf =
+        function
+        | (Literal | Conjunction | Disjunction), (Literal | Conjunction | Disjunction) -> Disjunction
         | _ -> Unknown
         
-    let notf _ = function Not (Comparison _) -> Literal | _ -> Unknown
+    let notf _ =
+        function
+        | Not (Comparison _) -> Literal
+        | _ -> Unknown
         
     let value v _ _ = v
 

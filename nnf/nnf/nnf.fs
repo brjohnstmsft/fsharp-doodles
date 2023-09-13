@@ -2,6 +2,7 @@
 
 open NNF.NNFExpr
 
+// Reference: https://en.wikipedia.org/wiki/Negation_normal_form
 // Classical one-pass recursive implementation of NNF based on its Boolean algebra definition
 let rec nnf expr =
     match expr with

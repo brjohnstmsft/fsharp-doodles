@@ -31,23 +31,20 @@ let classifyCnfRecursive =
 // CNF classification implemented in terms of xfold.
 // NOTE: This is not strictly iterative, but in principle it could be if xfold were internally implemented iteratively.
 let classifyCnfIterative expr =
-    let orf (lhs, rhs) =
-        match lhs with
-        | Literal | Disjunction ->
-            match rhs with
-            | Literal | Disjunction -> Disjunction
-            | _ -> Unknown
+    let orf =
+        function
+        | (Literal | Disjunction), (Literal | Disjunction) -> Disjunction
         | _ -> Unknown
         
-    let andf (lhs, rhs) =
-        match lhs with
-        | Literal | Disjunction | Conjunction ->
-            match rhs with
-            | Literal | Disjunction | Conjunction -> Conjunction
-            | _ -> Unknown
+    let andf =
+        function
+        | (Literal | Disjunction | Conjunction), (Literal | Disjunction | Conjunction) -> Conjunction
         | _ -> Unknown
         
-    let notf _ = function Not (Comparison _) -> Literal | _ -> Unknown
+    let notf _ =
+        function
+        | Not (Comparison _) -> Literal
+        | _ -> Unknown
         
     let value v _ _ = v
 

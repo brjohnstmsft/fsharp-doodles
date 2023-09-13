@@ -1,5 +1,7 @@
 ﻿module NNF.NNFExpr
 
+open System.Collections.Generic
+
 // Prototype for transforming ASTs into nnf in a bottom-up manner.
 type Operator =
     | Less
@@ -45,9 +47,9 @@ let GreaterOrEqualTo s i = Comparison (s, GreaterOrEqual, i)
 
 // Recursively navigate the AST in depth-first preorder, flowing and updating a given accumulator value to pass to each step,
 // and accumulating a final result as the traversal winds back up the three.
-let rec private xfoldAcc andf orf notf anyf allf compf updateAcc acc expr : 'r =
+let rec private xfoldAcc' andf orf notf anyf allf compf updateAcc acc expr : 'r =
     let newAcc = updateAcc expr acc
-    let recurse = xfoldAcc andf orf notf anyf allf compf updateAcc newAcc
+    let recurse = xfoldAcc' andf orf notf anyf allf compf updateAcc newAcc
     match expr with
     | And (left, right) -> andf (recurse left, recurse right) expr acc
     | Or (left, right) -> orf (recurse left, recurse right) expr acc
@@ -56,7 +58,105 @@ let rec private xfoldAcc andf orf notf anyf allf compf updateAcc acc expr : 'r =
     | All x -> allf (recurse x) expr acc
     | Comparison t -> compf t expr acc
 
-// Recursively navigate the AST in depth-first preorder, accumulating a final result as the traversal winds back up the three.
+// Iteratively navigate the AST in depth-first preorder, flowing and updating a given accumulator value to pass to each step,
+// and accumulating a final result as the traversal winds back up the three.
+let private xfoldAcc andf orf notf anyf allf compf updateAcc (acc: 'a) expr : 'r =
+    let forEachChild callback expr =
+        match expr with
+        | And (left, right) ->
+            callback(left)
+            callback(right)
+        | Or (left, right) ->
+            callback(left)
+            callback(right)
+        | Not e -> callback(e)
+        | Any e -> callback(e)
+        | All e -> callback(e)
+        | Comparison _ -> ()
+
+    let traversalStack =
+        // To avoid recursion, we need to load up a stack of nodes such that they can be popped in post-order.
+        // To do this, we use two stacks in a manner similar in spirit to the Shunting Yard algorithm.
+        //
+        // Here is an example of the main Shunting Yard mechanic. Given a tree like this:
+        //
+        //        1
+        //       / \
+        //      2   3
+        //     / \
+        //    4   5
+        //
+        // The processing steps look like this, where I is the intermediate stack and F is the final stack:
+        //
+        // 1.       2.          3.          4.             5.                6.
+        // I: [1]   I: [3, 2]   I: [2]      I: [5, 4]      I: [4]            I: []
+        // F: []    F: [1]      F: [3, 1]   F: [2, 3, 1]   F: [5, 2, 3, 1]   F: [4, 5, 2, 3, 1]
+        let finalStack = Stack<(Expr * 'a)>()
+        let intermediateStack = Stack<(Expr * 'a)>()
+
+        intermediateStack.Push((expr, acc));
+
+        while intermediateStack.Count > 0 do
+            let (currentExpr, currentAcc) = intermediateStack.Pop()
+            finalStack.Push((currentExpr, currentAcc))
+
+            // Get the new state to use for the child nodes.
+            let newAcc = updateAcc currentExpr currentAcc
+
+            // Push children of the current child node to the intermediate stack. Note that we push left-to-right,
+            // so that they will be popped right-to-left, and therefore pushed on the final stack in right-to-left
+            // order, putting the leftmost leaf at the top of the stack (see example above).
+            currentExpr |> forEachChild (fun child ->
+                intermediateStack.Push((child, newAcc))
+            )
+
+        finalStack
+
+    // This stack will hold values returned by recent visits. When visiting a non-terminal node, the top of
+    // the stack will contain results of visiting child nodes for the current node. Values are pushed onto
+    // this stack in the same order that the nodes are visited (left-to-right), so consuming code must pop
+    // them in the opposite order (right-to-left).
+    let visitResultStack = Stack<'r>()
+
+    let iterate currentAcc currentExpr =
+        let callback f t = f t currentExpr currentAcc
+
+        match currentExpr with
+        | And _ ->
+            // Pop in reverse order, since nodes were visited in order.
+            let right = visitResultStack.Pop()
+            let left = visitResultStack.Pop()
+            callback andf (left, right)
+        | Or _ ->
+            // Pop in reverse order, since nodes were visited in order.
+            let right = visitResultStack.Pop()
+            let left = visitResultStack.Pop()
+            callback orf (left, right)
+        | Not _ -> visitResultStack.Pop() |> callback notf
+        | Any _ -> visitResultStack.Pop() |> callback anyf
+        | All _ -> visitResultStack.Pop() |> callback allf
+        | Comparison t -> callback compf t
+
+    // At this point traversalStack contains all the nodes in left-to-right post-order (meaning the leftmost
+    // deepest leaf is at the top of the stack), plus state information. We can just iterate through them
+    // and visit each one. For example, for a trivial binary tree with parent node P, left leaf L, and
+    // right leaf R, traversalStack will contain [L, R, P] where L is the top of the stack.
+    while traversalStack.Count > 0 do
+        let (currentExpr, currentAcc) = traversalStack.Pop()
+        let resultForCurrentExpr = iterate currentAcc currentExpr
+
+        visitResultStack.Push(resultForCurrentExpr)
+
+    let result = visitResultStack.Pop()
+
+    if visitResultStack.Count > 0 then
+        // If this happens, iterate has a logic error whereby child nodes are being left behind on the
+        // visited node stack.
+        invalidOp "iterate left behind child nodes on the visited node stack."
+
+    result
+
+// Recursively navigate the AST in depth-first preorder, accumulating a final result as the traversal winds back up the tree.
 let xfold andf orf notf anyf allf compf expr : 'r =
     let ignoreAcc f t e _ = f t e
     let update _ acc = acc
