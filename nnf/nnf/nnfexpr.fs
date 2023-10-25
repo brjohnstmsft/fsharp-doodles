@@ -107,8 +107,7 @@ let private xfoldAcc andf orf notf anyf allf compf updateAcc (acc: 'a) expr : 'r
             // so that they will be popped right-to-left, and therefore pushed on the final stack in right-to-left
             // order, putting the leftmost leaf at the top of the stack (see example above).
             currentExpr |> forEachChild (fun child ->
-                intermediateStack.Push((child, newAcc))
-            )
+                intermediateStack.Push((child, newAcc)))
 
         finalStack
 

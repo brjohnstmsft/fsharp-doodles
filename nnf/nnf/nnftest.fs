@@ -16,7 +16,7 @@ let tree =
                 let! variableName = gen {
                     let alphabet = [|'a'..'z'|]
                     let! index = choose (0, alphabet.Length - 1)
-                    return alphabet.[index].ToString ()
+                    return alphabet[index].ToString()
                 }
 
                 let! operator = Arb.generate<Operator>
@@ -35,7 +35,7 @@ let tree =
                 Gen.map All subtree
                 Gen.map2 (fun x y -> And (x, y)) subtree subtree
                 Gen.map2 (fun x y -> Or (x, y)) subtree subtree]
-        | _ -> invalidArg "s" "Only positive sizes are allowed."
+        | _ -> invalidArg "s" "Only non-negative sizes are allowed."
 
     Gen.sized tree'
 
